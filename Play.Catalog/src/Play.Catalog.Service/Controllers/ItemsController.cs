@@ -21,11 +21,54 @@ namespace Play.Catalog.Service.Controllers
         }
 
         [HttpGet("{id}")]
-        public ItemDto GetById(Guid id)
+        public ActionResult<ItemDto> GetById(Guid id)
         {
-            var item = items.Where(item => item.id == id).SingleOrDefault();
+            var item = items.Where(item => item.Id == id).SingleOrDefault();
 
-            return item;
+            if (item == null) return NotFound();
+
+            return Ok(item);
+        }
+
+        [HttpPost]
+        public ActionResult<ItemDto> Post(CreateItemDto createItemDto)
+        {
+            var item = new ItemDto(Guid.NewGuid(), createItemDto.Name, createItemDto.Description, createItemDto.Price, DateTimeOffset.UtcNow);
+            items.Add(item);
+
+            return CreatedAtAction(nameof(GetById), new { id = item.Id }, item);
+        }
+
+        [HttpPut("{id}")]
+        public IActionResult Put(Guid id, UpdateItemDto updateItemDto)
+        {
+            var existingItem = items.Where(item => item.Id == id).SingleOrDefault();
+
+            if (existingItem == null) return NotFound();
+
+            var updateItem = existingItem with
+            {
+                Name = updateItemDto.Name,
+                Description = updateItemDto.Description,
+                Price = updateItemDto.Price
+            };
+
+            var index = items.FindIndex(existingItem => existingItem.Id == id);
+            items[index] = updateItem;
+
+            return NoContent();
+        }
+
+        [HttpDelete("{id}")]
+        public IActionResult Delete(Guid id)
+        {
+            var index = items.FindIndex(existingItem => existingItem.Id == id);
+
+            if (index < 0) return NotFound();
+
+            items.RemoveAt(index);
+
+            return NoContent();
         }
     }
 }
