@@ -6,6 +6,8 @@ using Play.Common.Settings;
 
 var builder = WebApplication.CreateBuilder(args);
 
+const string AllowedOriginSetting = "AllowedOrigin";
+
 builder.Services
     .AddMongo()
     .AddMongoRepository<Item>("items")
@@ -30,6 +32,13 @@ if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
+
+    app.UseCors(build =>
+    {
+        build.WithOrigins(builder.Configuration[AllowedOriginSetting])
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
 }
 
 app.UseHttpsRedirection();

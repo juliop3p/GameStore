@@ -1,73 +1,95 @@
-using Microsoft.Extensions.DependencyInjection;
+using Play.Common.MassTransit;
 using Play.Common.MongoDB;
 using Play.Inventory.Service.Clients;
 using Play.Inventory.Service.Entities;
 using Polly;
 using Polly.Timeout;
 
-var builder = WebApplication.CreateBuilder(args);
-
-// Add services to the container.
-
-builder.Services
-    .AddMongo()
-    .AddMongoRepository<InventoryItem>("inventoryitems");
-
-Random jitterer = new Random();
-
-builder.Services.AddHttpClient<CatalogClient>(client =>
+internal class Program
 {
-    client.BaseAddress = new Uri("https://localhost:5001");
-})
-.AddTransientHttpErrorPolicy(build =>
-    build.Or<TimeoutRejectedException>().WaitAndRetryAsync(
-        5, 
-        retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))
-            + TimeSpan.FromMilliseconds(jitterer.Next(0, 1000)),
-        onRetry: (outcome, timespan, retryAttempt) => 
+    private static void Main(string[] args)
+    {
+        var builder = WebApplication.CreateBuilder(args);
+
+        const string AllowedOriginSetting = "AllowedOrigin";
+
+        // Add services to the container.
+
+        builder.Services
+            .AddMongo()
+            .AddMongoRepository<InventoryItem>("inventoryitems")
+            .AddMongoRepository<CatalogItem>("catalogitems")
+            .AddMassTransitWithRabbitMq();
+
+        AddCatalogClient(builder);
+
+        builder.Services.AddControllers();
+        // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
+        builder.Services.AddEndpointsApiExplorer();
+        builder.Services.AddSwaggerGen();
+
+        var app = builder.Build();
+
+        // Configure the HTTP request pipeline.
+        if (app.Environment.IsDevelopment())
         {
-            var serviceProvider = builder.Services.BuildServiceProvider();
-            serviceProvider.GetService<ILogger<CatalogClient>>() ? 
-                .LogWarning($"Delaying for {timespan.TotalSeconds} seconds, then making retry {retryAttempt}");
+            app.UseSwagger();
+            app.UseSwaggerUI();
+
+            app.UseCors(build =>
+            {
+                build.WithOrigins(builder.Configuration[AllowedOriginSetting])
+                    .AllowAnyHeader()
+                    .AllowAnyMethod();
+            });
         }
-    ))
-.AddTransientHttpErrorPolicy(build => build.Or<TimeoutRejectedException>()
-    .CircuitBreakerAsync(
-        3,
-        TimeSpan.FromSeconds(15),
-        onBreak: (outcome, timespan) => 
+
+        app.UseHttpsRedirection();
+
+        app.UseAuthorization();
+
+        app.MapControllers();
+
+        app.Run();
+    }
+
+    private static void AddCatalogClient(WebApplicationBuilder builder)
+    {
+        Random jitterer = new Random();
+
+        builder.Services.AddHttpClient<CatalogClient>(client =>
         {
-            var serviceProvider = builder.Services.BuildServiceProvider();
-            serviceProvider.GetService<ILogger<CatalogClient>>()?
-                .LogWarning($"Opening the circuit for {timespan.TotalSeconds} seconds...");
-        },
-        onReset: () => 
-        {
-            var serviceProvider = builder.Services.BuildServiceProvider();
-            serviceProvider.GetService<ILogger<CatalogClient>>()?
-                .LogWarning($"Closing the circuit...");
-        }
-    ))
-.AddPolicyHandler(Policy.TimeoutAsync<HttpResponseMessage>(1));
-
-builder.Services.AddControllers();
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
-
-var app = builder.Build();
-
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
+            client.BaseAddress = new Uri("https://localhost:5001");
+        })
+        .AddTransientHttpErrorPolicy(build =>
+            build.Or<TimeoutRejectedException>().WaitAndRetryAsync(
+                5,
+                retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))
+                    + TimeSpan.FromMilliseconds(jitterer.Next(0, 1000)),
+                onRetry: (outcome, timespan, retryAttempt) =>
+                {
+                    var serviceProvider = builder.Services.BuildServiceProvider();
+                    serviceProvider.GetService<ILogger<CatalogClient>>()?
+                        .LogWarning($"Delaying for {timespan.TotalSeconds} seconds, then making retry {retryAttempt}");
+                }
+            ))
+        .AddTransientHttpErrorPolicy(build => build.Or<TimeoutRejectedException>()
+            .CircuitBreakerAsync(
+                3,
+                TimeSpan.FromSeconds(15),
+                onBreak: (outcome, timespan) =>
+                {
+                    var serviceProvider = builder.Services.BuildServiceProvider();
+                    serviceProvider.GetService<ILogger<CatalogClient>>()?
+                        .LogWarning($"Opening the circuit for {timespan.TotalSeconds} seconds...");
+                },
+                onReset: () =>
+                {
+                    var serviceProvider = builder.Services.BuildServiceProvider();
+                    serviceProvider.GetService<ILogger<CatalogClient>>()?
+                        .LogWarning($"Closing the circuit...");
+                }
+            ))
+        .AddPolicyHandler(Policy.TimeoutAsync<HttpResponseMessage>(1));
+    }
 }
-
-app.UseHttpsRedirection();
-
-app.UseAuthorization();
-
-app.MapControllers();
-
-app.Run();
